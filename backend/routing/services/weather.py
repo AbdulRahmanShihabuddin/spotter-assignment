@@ -53,7 +53,7 @@ class OpenMeteoWeatherProvider(BaseWeatherProvider):
     """
     BASE_URL = "https://api.open-meteo.com/v1/forecast"
 
-    def __init__(self, api_key: str | None = None, timeout: int = 12):
+    def __init__(self, api_key: str | None = None, timeout: int = 20):
         self.api_key = api_key or getattr(settings, "OPENMETEO_API_KEY", "")
         self.timeout = timeout
         self.session = requests.Session()
@@ -65,6 +65,7 @@ class OpenMeteoWeatherProvider(BaseWeatherProvider):
     def _fetch_batch_forecasts(self, coords: list[tuple[float, float]]) -> list[dict[str, Any] | None]:
         """
         Fetch hourly weather forecasts for a batch of coordinates.
+        Uses 14-day forecast window + 1 past day to eliminate out-of-horizon mismatches.
         Returns list of parsed hourly forecast maps for each coordinate.
         """
         if not coords:
@@ -79,19 +80,28 @@ class OpenMeteoWeatherProvider(BaseWeatherProvider):
             "hourly": "wind_speed_10m,rain,snowfall",
             "wind_speed_unit": "mph",
             "precipitation_unit": "inch",
-            "forecast_days": 3,  # 0 to 72 hours
+            "past_days": 1,
+            "forecast_days": 14,
             "timezone": "UTC",
         }
 
         if self.api_key:
             params["apikey"] = self.api_key
 
-        try:
-            resp = self.session.get(self.BASE_URL, params=params, timeout=self.timeout)
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.exceptions.RequestException as e:
-            logger.error("Open-Meteo weather batch request failed: %s", str(e))
+        data = None
+        for attempt in range(2):
+            try:
+                resp = self.session.get(self.BASE_URL, params=params, timeout=self.timeout)
+                resp.raise_for_status()
+                data = resp.json()
+                break
+            except requests.exceptions.RequestException as e:
+                logger.warning("Open-Meteo batch request attempt %d failed: %s", attempt + 1, str(e))
+                if attempt == 0:
+                    time.sleep(0.5)
+
+        if data is None:
+            logger.error("Open-Meteo weather batch request failed after 2 attempts.")
             return [None] * len(coords)
 
         # Multi-location returns a list; single location returns an object
@@ -164,8 +174,8 @@ class OpenMeteoWeatherProvider(BaseWeatherProvider):
                 uncached_coords.append((lat, lon))
                 uncached_indices.append(idx)
 
-        # Batch fetch uncached coordinates in chunks of up to 30
-        chunk_size = 30
+        # Batch fetch uncached coordinates in smaller chunks of 15 for reliability on cloud hosts
+        chunk_size = 15
         for i in range(0, len(uncached_coords), chunk_size):
             chunk = uncached_coords[i:i + chunk_size]
             self._fetch_batch_forecasts(chunk)
