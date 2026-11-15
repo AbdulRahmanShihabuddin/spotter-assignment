@@ -68,6 +68,20 @@ class RoutePlanViewTest(TestCase):
         self.assertIn("weather", first_cp)
         self.assertIn("risk_level", first_cp["weather"])
 
+        # Phase 3 verifications
+        self.assertIn("risk_summary", first_route)
+        summary = first_route["risk_summary"]
+        self.assertIn("severe_risk_miles", summary)
+        self.assertIn("high_risk_miles", summary)
+        self.assertIn("average_risk", summary)
+        self.assertIn("has_no_travel", summary)
+
+        self.assertIn("recommendation", data)
+        rec = data["recommendation"]
+        self.assertTrue(rec["has_recommendation"])
+        self.assertIsNotNone(rec["recommended_route_id"])
+        self.assertGreater(len(rec["reason"]), 0)
+
     @override_settings(USE_MOCK_ROUTING=False)
     @patch("routing.services.geocoding.NominatimGeocodingService.geocode")
     def test_origin_not_found(self, mock_geocode):

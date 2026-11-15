@@ -118,6 +118,21 @@ class RiskCountsSerializer(serializers.Serializer):
     unavailable = serializers.IntegerField(default=0)
 
 
+class RiskSummarySerializer(serializers.Serializer):
+    severe_risk_miles = serializers.FloatField(default=0.0)
+    high_risk_miles = serializers.FloatField(default=0.0)
+    moderate_risk_miles = serializers.FloatField(default=0.0)
+    low_risk_miles = serializers.FloatField(default=0.0)
+    no_travel_miles = serializers.FloatField(default=0.0)
+    unavailable_miles = serializers.FloatField(default=0.0)
+    average_risk = serializers.FloatField(default=0.0)
+    has_no_travel = serializers.BooleanField(default=False)
+    has_unavailable = serializers.BooleanField(default=False)
+    total_distance_miles = serializers.FloatField(default=0.0)
+    travel_duration_hours = serializers.FloatField(default=0.0)
+    evaluated_segments_count = serializers.IntegerField(default=0)
+
+
 class RouteOptionSerializer(serializers.Serializer):
     route_id = serializers.CharField()
     name = serializers.CharField()
@@ -132,6 +147,20 @@ class RouteOptionSerializer(serializers.Serializer):
     provider = serializers.CharField()
     max_risk_level = serializers.CharField(default="Low")
     risk_counts = RiskCountsSerializer(required=False)
+    risk_summary = RiskSummarySerializer(required=False)
+    is_recommended = serializers.BooleanField(default=False)
+    recommendation_reason = serializers.CharField(allow_null=True, required=False)
+    is_eligible = serializers.BooleanField(default=True)
+    ineligibility_reason = serializers.CharField(allow_null=True, required=False)
+    rank = serializers.IntegerField(allow_null=True, required=False)
+
+
+class RecommendationSerializer(serializers.Serializer):
+    recommended_route_id = serializers.CharField(allow_null=True)
+    has_recommendation = serializers.BooleanField()
+    reason = serializers.CharField()
+    evaluated_routes_count = serializers.IntegerField()
+    eligible_routes_count = serializers.IntegerField()
 
 
 class GeocodedLocationSerializer(serializers.Serializer):
@@ -149,3 +178,4 @@ class RoutePlanResponseSerializer(serializers.Serializer):
     checkpoint_interval_miles = serializers.IntegerField()
     routes = RouteOptionSerializer(many=True)
     total_routes_found = serializers.IntegerField()
+    recommendation = RecommendationSerializer(required=False)

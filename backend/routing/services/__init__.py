@@ -10,6 +10,7 @@ from .risk_engine import (
     evaluate_checkpoint_weather,
 )
 from .weather import BaseWeatherProvider, get_weather_provider
+from .recommendation import calculate_route_risk_summary, rank_and_recommend_routes
 
 __all__ = [
     "GeocodedLocation",
@@ -27,4 +28,6 @@ __all__ = [
     "evaluate_checkpoint_weather",
     "BaseWeatherProvider",
     "get_weather_provider",
+    "calculate_route_risk_summary",
+    "rank_and_recommend_routes",
 ]

@@ -19,7 +19,7 @@ export const Header: React.FC<HeaderProps> = ({ providerName = 'osrm', isMock = 
               WEATHER-AWARE TRUCK ROUTING
             </h1>
             <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-dark-panel border border-dark-border text-slate-400">
-              PHASE 1
+              COMMERCIAL
             </span>
           </div>
           <p className="text-[11px] text-slate-400">

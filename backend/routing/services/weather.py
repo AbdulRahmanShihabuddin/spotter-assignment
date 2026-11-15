@@ -2,7 +2,7 @@
 Weather provider services for hourly checkpoint forecasts and caching.
 """
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 import math
 import time
@@ -268,7 +268,23 @@ class MockWeatherProvider(BaseWeatherProvider):
 
             risk_data = evaluate_checkpoint_weather(weather_obs, weight_lbs)
             cp_copy["weather"] = risk_data
-            cp_copy["hourly_forecast"] = []
+
+            # Generate synthetic 48-hour timeline for offline development / test slider inspection
+            timeline = []
+            base_dt = parse_iso_datetime(departure_time.isoformat() if isinstance(departure_time, datetime) else str(departure_time))
+            for h in range(48):
+                h_dt = base_dt + timedelta(hours=h)
+                # Diurnal temperature/wind variation
+                h_wind = max(5.0, wind_mph + 6.0 * math.sin((h + progress * 10) * 0.25))
+                h_rain = max(0.0, rain_in_hr * (1.0 + 0.5 * math.cos(h * 0.3)))
+                timeline.append({
+                    "time": h_dt.isoformat(),
+                    "wind_mph": round(h_wind, 1),
+                    "rain_in_hr": round(h_rain, 3),
+                    "snow_in_hr": 0.0,
+                })
+
+            cp_copy["hourly_forecast"] = timeline
             enriched.append(cp_copy)
 
         return enriched

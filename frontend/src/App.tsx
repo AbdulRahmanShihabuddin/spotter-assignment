@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { TripForm } from './components/TripForm';
 import { RouteComparison } from './components/RouteComparison';
@@ -22,6 +22,7 @@ export function App() {
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<Checkpoint | null>(null);
   const [truckWeightLbs, setTruckWeightLbs] = useState<number>(42000);
+  const [forecastOffsetHours, setForecastOffsetHours] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<{ message: string; detail?: string } | null>(null);
   const [backendStatus, setBackendStatus] = useState<{
@@ -34,6 +35,15 @@ export function App() {
     is_mock: false,
   });
 
+  const inspectorRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll inspector into view when a checkpoint is clicked
+  useEffect(() => {
+    if (selectedCheckpoint && inspectorRef.current) {
+      inspectorRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [selectedCheckpoint]);
+
   // Check backend health on mount
   useEffect(() => {
     checkBackendHealth().then((status) => {
@@ -45,13 +55,17 @@ export function App() {
     setIsLoading(true);
     setErrorMessage(null);
     setSelectedCheckpoint(null);
+    setForecastOffsetHours(null);
     setTruckWeightLbs(params.weight_lbs);
 
     try {
       const response = await planRoute(params);
       setRoutePlan(response);
 
-      if (response.routes && response.routes.length > 0) {
+      // Prefer the recommended route as the initial active selection
+      if (response.recommendation?.recommended_route_id) {
+        setSelectedRouteId(response.recommendation.recommended_route_id);
+      } else if (response.routes && response.routes.length > 0) {
         setSelectedRouteId(response.routes[0].route_id);
       } else {
         setSelectedRouteId(null);
@@ -108,10 +122,11 @@ export function App() {
             isLoading={isLoading}
           />
 
-          {/* Route Comparison Section */}
+          {/* Route Comparison & Recommendation Section */}
           {routes.length > 0 && (
             <RouteComparison
               routes={routes}
+              recommendation={routePlan?.recommendation}
               selectedRouteId={selectedRouteId}
               onSelectRoute={handleSelectRoute}
               colors={ROUTE_COLORS}
@@ -120,11 +135,15 @@ export function App() {
 
           {/* Checkpoint Inspector Panel */}
           {selectedCheckpoint && (
-            <CheckpointInspector
-              checkpoint={selectedCheckpoint}
-              onClose={() => setSelectedCheckpoint(null)}
-              truckWeightLbs={truckWeightLbs}
-            />
+            <div ref={inspectorRef}>
+              <CheckpointInspector
+                checkpoint={selectedCheckpoint}
+                onClose={() => setSelectedCheckpoint(null)}
+                truckWeightLbs={truckWeightLbs}
+                departureTime={routePlan?.departure_time}
+                forecastOffsetHours={forecastOffsetHours}
+              />
+            </div>
           )}
 
           {/* Instruction hint if checkpoints are loaded but none selected */}
@@ -135,7 +154,7 @@ export function App() {
           )}
         </aside>
 
-        {/* Right Main Area: Large Interactive Map */}
+        {/* Right Main Area: Large Interactive Map & Weather Heatmap */}
         <section className="flex-1 h-full relative overflow-hidden bg-dark-bg">
           <RouteMap
             origin={routePlan?.origin || null}
@@ -147,6 +166,10 @@ export function App() {
             onSelectCheckpoint={setSelectedCheckpoint}
             colors={ROUTE_COLORS}
             isLoading={isLoading}
+            departureTime={routePlan?.departure_time}
+            forecastOffsetHours={forecastOffsetHours}
+            onChangeForecastOffset={setForecastOffsetHours}
+            truckWeightLbs={truckWeightLbs}
           />
         </section>
       </main>

@@ -53,6 +53,21 @@ export interface RiskCounts {
   unavailable: number;
 }
 
+export interface RiskSummary {
+  severe_risk_miles: number;
+  high_risk_miles: number;
+  moderate_risk_miles: number;
+  low_risk_miles: number;
+  no_travel_miles: number;
+  unavailable_miles: number;
+  average_risk: number;
+  has_no_travel: boolean;
+  has_unavailable: boolean;
+  total_distance_miles: number;
+  travel_duration_hours: number;
+  evaluated_segments_count: number;
+}
+
 export interface RouteOption {
   route_id: string;
   name: string;
@@ -67,6 +82,20 @@ export interface RouteOption {
   provider: string;
   max_risk_level?: RiskLevelType;
   risk_counts?: RiskCounts;
+  risk_summary?: RiskSummary;
+  is_recommended?: boolean;
+  recommendation_reason?: string | null;
+  is_eligible?: boolean;
+  ineligibility_reason?: string | null;
+  rank?: number | null;
+}
+
+export interface RouteRecommendation {
+  recommended_route_id: string | null;
+  has_recommendation: boolean;
+  reason: string;
+  evaluated_routes_count: number;
+  eligible_routes_count: number;
 }
 
 export interface RoutePlanRequest {
@@ -85,6 +114,7 @@ export interface RoutePlanResponse {
   checkpoint_interval_miles: number;
   routes: RouteOption[];
   total_routes_found: number;
+  recommendation?: RouteRecommendation;
 }
 
 export interface ApiErrorResponse {

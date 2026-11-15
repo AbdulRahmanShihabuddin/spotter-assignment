@@ -2,7 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { Layers, Navigation } from 'lucide-react';
 import { Checkpoint, GeocodedLocation, RiskLevelType, RouteOption } from '../types/route';
-import { RISK_COLORS } from '../utils/risk';
+import {
+  getForecastAtOffset,
+  RISK_COLORS,
+  RISK_SEVERITY_ORDER,
+} from '../utils/risk';
+import { ForecastSlider } from './ForecastSlider';
 
 interface RouteMapProps {
   origin: GeocodedLocation | null;
@@ -14,6 +19,41 @@ interface RouteMapProps {
   onSelectCheckpoint?: (checkpoint: Checkpoint | null) => void;
   colors: Record<string, string>;
   isLoading?: boolean;
+  departureTime?: string;
+  forecastOffsetHours?: number | null;
+  onChangeForecastOffset?: (offset: number | null) => void;
+  truckWeightLbs?: number;
+}
+
+/**
+ * Finds the index of the coordinate in coords array that is closest to (lat, lon).
+ */
+function findClosestCoordIndex(coords: [number, number][], lat: number, lon: number, startIndex = 0): number {
+  let closestIdx = startIndex;
+  let minSqDist = Infinity;
+
+  for (let i = startIndex; i < coords.length; i++) {
+    const [cLon, cLat] = coords[i];
+    const dLat = cLat - lat;
+    const dLon = cLon - lon;
+    const sqDist = dLat * dLat + dLon * dLon;
+    if (sqDist < minSqDist) {
+      minSqDist = sqDist;
+      closestIdx = i;
+    }
+  }
+
+  return closestIdx;
+}
+
+function worseRisk(riskA: RiskLevelType, riskB: RiskLevelType): RiskLevelType {
+  const rankA = RISK_SEVERITY_ORDER[riskA] ?? 1;
+  const rankB = RISK_SEVERITY_ORDER[riskB] ?? 1;
+
+  if (rankA >= rankB) {
+    return riskA;
+  }
+  return riskB;
 }
 
 export const RouteMap: React.FC<RouteMapProps> = ({
@@ -26,10 +66,15 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   onSelectCheckpoint,
   colors,
   isLoading = false,
+  departureTime,
+  forecastOffsetHours = null,
+  onChangeForecastOffset,
+  truckWeightLbs = 35000,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const routeLayersRef = useRef<L.FeatureGroup | null>(null);
+  const heatmapLayersRef = useRef<L.FeatureGroup | null>(null);
   const checkpointLayersRef = useRef<L.FeatureGroup | null>(null);
   const markerLayersRef = useRef<L.FeatureGroup | null>(null);
   const prevRoutesRef = useRef<RouteOption[] | null>(null);
@@ -49,7 +94,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     // Zoom control in bottom right
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-    // OpenStreetMap standard tiles with high-contrast dark CSS filter (no watermarks, free)
+    // OpenStreetMap standard tiles with high-contrast dark CSS filter
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution:
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
@@ -58,10 +103,12 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     }).addTo(map);
 
     const routeGroup = L.featureGroup().addTo(map);
+    const heatmapGroup = L.featureGroup().addTo(map);
     const checkpointGroup = L.featureGroup().addTo(map);
     const markerGroup = L.featureGroup().addTo(map);
 
     routeLayersRef.current = routeGroup;
+    heatmapLayersRef.current = heatmapGroup;
     checkpointLayersRef.current = checkpointGroup;
     markerLayersRef.current = markerGroup;
     mapInstanceRef.current = map;
@@ -72,14 +119,19 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     };
   }, []);
 
-  // Render Routes and Fit Bounds
+  // Pre-calculate sliced geometry segments for the active route
+  const activeRoute = routes.find((r) => r.route_id === selectedRouteId) || routes[0] || null;
+
+  // Render Routes, Heatmap Segments, and Markers
   useEffect(() => {
     const map = mapInstanceRef.current;
     const routeGroup = routeLayersRef.current;
+    const heatmapGroup = heatmapLayersRef.current;
     const markerGroup = markerLayersRef.current;
-    if (!map || !routeGroup || !markerGroup) return;
+    if (!map || !routeGroup || !heatmapGroup || !markerGroup) return;
 
     routeGroup.clearLayers();
+    heatmapGroup.clearLayers();
     markerGroup.clearLayers();
 
     if (!routes || routes.length === 0) {
@@ -89,65 +141,138 @@ export const RouteMap: React.FC<RouteMapProps> = ({
 
     const allLatLngs: L.LatLng[] = [];
 
-    // Render unselected routes first, then selected route on top
-    const sortedRoutes = [...routes].sort((a, b) => {
-      if (a.route_id === selectedRouteId) return 1;
-      if (b.route_id === selectedRouteId) return -1;
-      return 0;
-    });
-
-    sortedRoutes.forEach((route) => {
+    // 1. Render all unselected alternative routes with muted corridor colors
+    routes.forEach((route) => {
       const isSelected = route.route_id === selectedRouteId;
-      const color = colors[route.route_id] || '#F59E0B';
-
-      const latLngs = route.geometry.coordinates.map(
-        ([lon, lat]) => L.latLng(lat, lon)
-      );
+      const latLngs = route.geometry.coordinates.map(([lon, lat]) => L.latLng(lat, lon));
 
       if (latLngs.length > 0) {
         allLatLngs.push(...latLngs);
       }
 
-      // Main Route Polyline
-      const polyline = L.polyline(latLngs, {
-        color: color,
-        weight: isSelected ? 5.5 : 3.0,
-        opacity: isSelected ? 0.95 : 0.40,
+      if (!isSelected) {
+        const altColor = colors[route.route_id] || '#F59E0B';
+        const polyline = L.polyline(latLngs, {
+          color: altColor,
+          weight: 3.0,
+          opacity: 0.35,
+          lineCap: 'round',
+          lineJoin: 'round',
+        });
+
+        polyline.on('mouseover', () => {
+          polyline.setStyle({ opacity: 0.75, weight: 4.5 });
+        });
+        polyline.on('mouseout', () => {
+          polyline.setStyle({ opacity: 0.35, weight: 3.0 });
+        });
+        polyline.on('click', () => {
+          onSelectRoute(route.route_id);
+        });
+
+        polyline.bindTooltip(
+          `<div class="font-sans">
+            <div class="font-semibold text-slate-100">${route.name}</div>
+            <div class="text-[11px] font-mono text-slate-300">
+              ${route.distance_miles.toFixed(1)} mi • ${(route.duration_hours).toFixed(1)} hrs • Max Risk: ${route.max_risk_level || 'Low'}
+            </div>
+            <div class="text-[10px] text-amber-400 font-mono">Click to select and view weather heatmap</div>
+          </div>`,
+          { sticky: true }
+        );
+
+        polyline.addTo(routeGroup);
+      }
+    });
+
+    // 2. Render Selected Route with Weather Heatmap along Corridor
+    if (activeRoute) {
+      const coords = activeRoute.geometry.coordinates;
+      const checkpoints = activeRoute.checkpoints || [];
+
+      // Dark background underlay for high visual contrast
+      const activeLatLngs = coords.map(([lon, lat]) => L.latLng(lat, lon));
+      const underlay = L.polyline(activeLatLngs, {
+        color: '#0B0D10',
+        weight: 8.5,
+        opacity: 0.9,
         lineCap: 'round',
         lineJoin: 'round',
       });
+      underlay.addTo(heatmapGroup);
 
-      // Hover and click interaction
-      polyline.on('mouseover', () => {
-        if (!isSelected) {
-          polyline.setStyle({ opacity: 0.8, weight: 4.5 });
+      // If route has checkpoints, slice the geometry into risk-colored segments
+      if (checkpoints.length > 1 && coords.length > 1) {
+        let lastCoordIdx = 0;
+
+        for (let i = 0; i < checkpoints.length - 1; i++) {
+          const cpStart = checkpoints[i];
+          const cpEnd = checkpoints[i + 1];
+
+          const startIdx = findClosestCoordIndex(coords, cpStart.latitude, cpStart.longitude, lastCoordIdx);
+          const endIdx = findClosestCoordIndex(coords, cpEnd.latitude, cpEnd.longitude, startIdx);
+          lastCoordIdx = endIdx;
+
+          // Determine risk at this segment
+          let riskStart: RiskLevelType = cpStart.weather?.risk_level || 'Low';
+          let riskEnd: RiskLevelType = cpEnd.weather?.risk_level || 'Low';
+
+          // If forecast offset is active, evaluate risk at target offset
+          if (forecastOffsetHours !== null && departureTime) {
+            const wStart = getForecastAtOffset(cpStart, departureTime, forecastOffsetHours, truckWeightLbs);
+            const wEnd = getForecastAtOffset(cpEnd, departureTime, forecastOffsetHours, truckWeightLbs);
+            riskStart = wStart.risk_level;
+            riskEnd = wEnd.risk_level;
+          }
+
+          const segRisk = worseRisk(riskStart, riskEnd);
+          const segColor = RISK_COLORS[segRisk] || '#10B981';
+
+          // Slice coordinates for this segment
+          const segCoords = coords.slice(startIdx, Math.max(endIdx + 1, startIdx + 2));
+          const segLatLngs = segCoords.length >= 2
+            ? segCoords.map(([lon, lat]) => L.latLng(lat, lon))
+            : [L.latLng(cpStart.latitude, cpStart.longitude), L.latLng(cpEnd.latitude, cpEnd.longitude)];
+
+          const segPolyline = L.polyline(segLatLngs, {
+            color: segColor,
+            weight: 5.5,
+            opacity: 0.95,
+            lineCap: 'round',
+            lineJoin: 'round',
+          });
+
+          const segMiles = Math.max(0, cpEnd.distance_miles - cpStart.distance_miles).toFixed(1);
+
+          segPolyline.bindTooltip(
+            `<div class="font-mono text-[11px] leading-tight space-y-0.5">
+              <div class="flex items-center justify-between space-x-2">
+                <span class="font-bold text-slate-100">Segment ${i + 1}: ${cpStart.distance_miles.toFixed(0)}-${cpEnd.distance_miles.toFixed(0)} mi (${segMiles} mi)</span>
+                <span style="color: ${segColor}; font-weight: 700;">${segRisk.toUpperCase()}</span>
+              </div>
+              <div class="text-slate-400 text-[10px]">
+                ${forecastOffsetHours !== null ? `Forecast Offset: +${forecastOffsetHours}h` : 'Condition at Truck ETA'}
+              </div>
+            </div>`,
+            { sticky: true }
+          );
+
+          segPolyline.addTo(heatmapGroup);
         }
-      });
+      } else {
+        // Fallback single polyline if no checkpoints
+        const fallbackPolyline = L.polyline(activeLatLngs, {
+          color: colors[activeRoute.route_id] || '#F59E0B',
+          weight: 5.5,
+          opacity: 0.95,
+          lineCap: 'round',
+          lineJoin: 'round',
+        });
+        fallbackPolyline.addTo(heatmapGroup);
+      }
+    }
 
-      polyline.on('mouseout', () => {
-        if (!isSelected) {
-          polyline.setStyle({ opacity: 0.40, weight: 3.0 });
-        }
-      });
-
-      polyline.on('click', () => {
-        onSelectRoute(route.route_id);
-      });
-
-      polyline.bindTooltip(
-        `<div class="font-sans">
-          <div class="font-semibold text-slate-100">${route.name}</div>
-          <div class="text-[11px] font-mono text-slate-300">
-            ${route.distance_miles} mi • ${(route.duration_hours).toFixed(1)} hrs • Max Risk: ${route.max_risk_level || 'Low'}
-          </div>
-        </div>`,
-        { sticky: true }
-      );
-
-      polyline.addTo(routeGroup);
-    });
-
-    // Add Origin Marker
+    // Add Origin Marker (A)
     if (origin) {
       const originIcon = L.divIcon({
         className: 'custom-map-marker',
@@ -184,7 +309,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       allLatLngs.push(L.latLng(origin.lat, origin.lon));
     }
 
-    // Add Destination Marker
+    // Add Destination Marker (B)
     if (destination) {
       const destIcon = L.divIcon({
         className: 'custom-map-marker',
@@ -233,7 +358,18 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         duration: 0.6,
       });
     }
-  }, [routes, selectedRouteId, origin, destination, colors, onSelectRoute]);
+  }, [
+    routes,
+    selectedRouteId,
+    activeRoute,
+    origin,
+    destination,
+    colors,
+    onSelectRoute,
+    forecastOffsetHours,
+    departureTime,
+    truckWeightLbs,
+  ]);
 
   // Render Risk-Coded Checkpoints along the selected route
   useEffect(() => {
@@ -242,15 +378,21 @@ export const RouteMap: React.FC<RouteMapProps> = ({
 
     checkpointGroup.clearLayers();
 
-    if (!showCheckpoints || !routes || routes.length === 0) {
+    if (!showCheckpoints || !routes || routes.length === 0 || !activeRoute) {
       return;
     }
 
-    const activeRoute = routes.find((r) => r.route_id === selectedRouteId) || routes[0];
-    if (!activeRoute || !activeRoute.checkpoints) return;
+    const checkpoints = activeRoute.checkpoints || [];
+    const isOffsetMode = forecastOffsetHours !== null && Boolean(departureTime);
 
-    activeRoute.checkpoints.forEach((cp) => {
-      const riskLevel: RiskLevelType = cp.weather?.risk_level || 'Low';
+    checkpoints.forEach((cp) => {
+      // Evaluate weather: either at offset or at arrival ETA
+      let weather = cp.weather;
+      if (isOffsetMode && departureTime) {
+        weather = getForecastAtOffset(cp, departureTime, forecastOffsetHours!, truckWeightLbs);
+      }
+
+      const riskLevel: RiskLevelType = weather?.risk_level || 'Low';
       const riskColor = RISK_COLORS[riskLevel] || '#10B981';
       const isSelectedCp = cp.id === selectedCheckpointId;
 
@@ -258,6 +400,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       const radius = isSelectedCp ? 7.0 : isElevated ? 5.5 : 4.0;
 
       const circle = L.circleMarker([cp.latitude, cp.longitude], {
+        className: 'checkpoint-marker',
         radius: radius,
         fillColor: riskColor,
         color: isSelectedCp ? '#FFFFFF' : '#0B0D10',
@@ -271,17 +414,18 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         minute: '2-digit',
       });
 
-      const weather = cp.weather;
       const windTxt = weather?.wind_mph !== null && weather?.wind_mph !== undefined ? `${weather.wind_mph} mph` : 'N/A';
       const rainTxt = weather?.rain_in_hr !== null && weather?.rain_in_hr !== undefined ? `${weather.rain_in_hr} in/h` : '0 in/h';
 
       circle.bindTooltip(
         `<div class="font-mono text-[11px] leading-tight space-y-0.5">
           <div class="flex items-center justify-between space-x-2">
-            <span class="font-bold text-slate-100">CP #${cp.sequence} (${cp.distance_miles} mi)</span>
+            <span class="font-bold text-slate-100">CP #${cp.sequence} (${cp.distance_miles.toFixed(1)} mi)</span>
             <span style="color: ${riskColor}; font-weight: 700;">${riskLevel.toUpperCase()}</span>
           </div>
-          <div class="text-slate-400 text-[10px]">ETA: ${etaTime}</div>
+          <div class="text-slate-400 text-[10px]">
+            ${isOffsetMode ? `Forecast: +${forecastOffsetHours}h` : `ETA: ${etaTime}`}
+          </div>
           <div class="text-slate-300 text-[10px]">Wind: ${windTxt} • Rain: ${rainTxt}</div>
         </div>`,
         { direction: 'top', offset: [0, -6] }
@@ -295,9 +439,16 @@ export const RouteMap: React.FC<RouteMapProps> = ({
 
       circle.addTo(checkpointGroup);
     });
-  }, [routes, selectedRouteId, showCheckpoints, selectedCheckpointId, onSelectCheckpoint]);
-
-  const activeRoute = routes.find((r) => r.route_id === selectedRouteId);
+  }, [
+    routes,
+    activeRoute,
+    showCheckpoints,
+    selectedCheckpointId,
+    onSelectCheckpoint,
+    forecastOffsetHours,
+    departureTime,
+    truckWeightLbs,
+  ]);
 
   return (
     <div className="relative w-full h-full bg-dark-bg overflow-hidden flex flex-col">
@@ -309,7 +460,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         <div className="absolute inset-0 z-20 bg-dark-bg/60 backdrop-blur-[2px] flex items-center justify-center pointer-events-none">
           <div className="px-4 py-3 rounded bg-dark-panel border border-dark-border shadow-xl flex items-center space-x-3 text-xs font-mono text-slate-200">
             <span className="w-2.5 h-2.5 rounded-full bg-amber-accent animate-ping" />
-            <span>Calculating corridors & retrieving hourly weather forecasts...</span>
+            <span>Calculating corridors, risk exposures & route recommendations...</span>
           </div>
         </div>
       )}
@@ -326,7 +477,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
             </h3>
             <p className="text-xs text-slate-400 leading-relaxed mb-4">
               Enter your trip details in the left panel and click{' '}
-              <strong className="text-slate-200">Analyze Route</strong> to compute corridors with hourly weather risk evaluation.
+              <strong className="text-slate-200">Analyze Route</strong> to compute corridors with weather risk evaluation, ranking, and recommendations.
             </p>
             <div className="grid grid-cols-3 gap-2 text-left text-[11px] border-t border-dark-border pt-3 text-slate-400">
               <div className="p-2 rounded bg-dark-surface/60 border border-dark-border/40">
@@ -348,7 +499,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
 
       {/* Floating Map Controls & Legends (Top Right) */}
       {routes.length > 0 && (
-        <div className="absolute top-4 right-4 z-10 flex flex-col items-end space-y-2 pointer-events-auto">
+        <div className="absolute top-4 right-4 z-10 flex flex-col items-end space-y-2 pointer-events-auto max-w-[220px]">
           {/* Checkpoints Toggle Button */}
           <button
             type="button"
@@ -370,7 +521,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
           </button>
 
           {/* Minimal Map Route Legend */}
-          <div className="p-2.5 rounded bg-dark-panel/95 border border-dark-border shadow-lg backdrop-blur-sm text-[11px] font-mono space-y-2 min-w-[190px]">
+          <div className="p-2.5 rounded bg-dark-panel/95 border border-dark-border shadow-lg backdrop-blur-sm text-[11px] font-mono space-y-2 w-full">
             <div>
               <span className="text-[10px] text-slate-400 font-semibold tracking-wider uppercase block border-b border-dark-border/60 pb-1 mb-1.5">
                 Corridors
@@ -393,7 +544,10 @@ export const RouteMap: React.FC<RouteMapProps> = ({
                       />
                       <span className="truncate">{route.name.split(':')[0]}</span>
                     </div>
-                    <span className="text-[10px] ml-2 font-medium shrink-0">
+                    {route.is_recommended && (
+                      <span className="text-amber-accent text-[10px] ml-1">★</span>
+                    )}
+                    <span className="text-[10px] ml-auto pl-1 font-medium shrink-0">
                       {route.distance_miles.toFixed(0)} mi
                     </span>
                   </div>
@@ -404,7 +558,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
             {/* Weather Risk Severity Scale */}
             <div className="border-t border-dark-border/60 pt-1.5">
               <span className="text-[9px] text-slate-400 font-semibold tracking-wider uppercase block mb-1">
-                Risk Levels
+                Risk Scale
               </span>
               <div className="grid grid-cols-5 gap-1 text-center text-[9px]">
                 <div className="flex flex-col items-center">
@@ -433,6 +587,18 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         </div>
       )}
 
+      {/* Floating 0-48 Hour Forecast Slider (Top Center or Bottom Right) */}
+      {routes.length > 0 && departureTime && onChangeForecastOffset && (
+        <div className="absolute top-4 left-4 z-10 pointer-events-auto max-w-[340px] sm:max-w-[420px] w-full">
+          <ForecastSlider
+            departureTime={departureTime}
+            forecastOffsetHours={forecastOffsetHours}
+            onChangeOffset={onChangeForecastOffset}
+            disabled={isLoading}
+          />
+        </div>
+      )}
+
       {/* Bottom Floating Stats Bar for Selected Route */}
       {activeRoute && (
         <div className="absolute bottom-4 left-4 z-10 pointer-events-auto">
@@ -446,6 +612,16 @@ export const RouteMap: React.FC<RouteMapProps> = ({
                 {activeRoute.name}
               </span>
             </div>
+
+            {activeRoute.is_recommended && (
+              <>
+                <span className="text-dark-border">|</span>
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-[10px]">
+                  ★ RECOMMENDED
+                </span>
+              </>
+            )}
+
             <span className="text-dark-border">|</span>
             <div>
               <span className="text-slate-400 text-[10px]">MAX RISK: </span>
@@ -469,13 +645,6 @@ export const RouteMap: React.FC<RouteMapProps> = ({
               <span className="text-slate-100 font-medium">
                 {Math.floor(activeRoute.duration_hours)}h{' '}
                 {Math.round((activeRoute.duration_hours % 1) * 60)}m
-              </span>
-            </div>
-            <span className="text-dark-border">|</span>
-            <div>
-              <span className="text-slate-400 text-[10px]">POINTS: </span>
-              <span className="text-slate-100 font-medium">
-                {activeRoute.checkpoint_count}
               </span>
             </div>
           </div>

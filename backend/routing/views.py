@@ -13,6 +13,8 @@ from routing.services import (
     get_routing_provider,
     get_weather_provider,
     RiskLevel,
+    calculate_route_risk_summary,
+    rank_and_recommend_routes,
 )
 from routing.services.risk_engine import RISK_SEVERITY_ORDER
 from routing.exceptions import RoutingAppError, GeocodingNotFoundError, NoRoutesFoundError
@@ -156,6 +158,17 @@ class RoutePlanView(APIView):
             route["max_risk_level"] = max_risk
             route["risk_counts"] = counts
 
+            # Step 4: Calculate Distance-Weighted Route Risk Summary
+            risk_summary = calculate_route_risk_summary(
+                checkpoints=enriched_checkpoints,
+                total_distance_miles=route.get("distance_miles", 0.0),
+                travel_duration_hours=route.get("duration_hours", 0.0),
+            )
+            route["risk_summary"] = risk_summary
+
+        # Step 5: Rank and Recommend Safest Corridor
+        recommendation = rank_and_recommend_routes(routes)
+
         response_payload = {
             "origin": origin_loc.to_dict(),
             "destination": dest_loc.to_dict(),
@@ -164,6 +177,7 @@ class RoutePlanView(APIView):
             "checkpoint_interval_miles": interval_miles,
             "routes": routes,
             "total_routes_found": len(routes),
+            "recommendation": recommendation,
         }
 
         # Validate with response serializer before returning
@@ -192,7 +206,7 @@ class HealthCheckView(APIView):
         return Response({
             "status": "healthy",
             "service": "weather-aware-truck-routing",
-            "phase": "Phase 2: Weather Integration, Checkpoint Sampling and Risk Classification",
+            "phase": "Phase 3: Route Recommendation, Weather Heatmap and Finalization",
             "routing_provider": "mock" if (use_mock and settings.DEBUG) else provider,
             "weather_provider": "mock" if use_mock_weather else weather_provider,
             "is_mock": bool(use_mock and settings.DEBUG),
