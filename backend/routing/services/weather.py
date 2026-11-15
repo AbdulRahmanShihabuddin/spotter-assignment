@@ -71,12 +71,12 @@ class OpenMeteoWeatherProvider(BaseWeatherProvider):
         if not coords:
             return []
 
-        lats = [c[0] for c in coords]
-        lons = [c[1] for c in coords]
+        lats_str = ",".join(f"{c[0]:.4f}" for c in coords) if len(coords) > 1 else str(coords[0][0])
+        lons_str = ",".join(f"{c[1]:.4f}" for c in coords) if len(coords) > 1 else str(coords[0][1])
 
         params: dict[str, Any] = {
-            "latitude": lats if len(lats) > 1 else lats[0],
-            "longitude": lons if len(lons) > 1 else lons[0],
+            "latitude": lats_str,
+            "longitude": lons_str,
             "hourly": "wind_speed_10m,rain,snowfall",
             "wind_speed_unit": "mph",
             "precipitation_unit": "inch",
@@ -95,6 +95,18 @@ class OpenMeteoWeatherProvider(BaseWeatherProvider):
                 resp.raise_for_status()
                 data = resp.json()
                 break
+            except requests.exceptions.HTTPError as e:
+                status_code = e.response.status_code if e.response is not None else "unknown"
+                logger.warning(
+                    "Open-Meteo batch HTTP %s (attempt %d/2): %s. Egress IP may be rate-limited by Open-Meteo free tier.",
+                    status_code, attempt + 1, str(e)
+                )
+                if status_code == 429:
+                    logger.error(
+                        "Open-Meteo rate limit exceeded (HTTP 429). On shared hosting like Render, free egress IPs are frequently throttled. Set USE_MOCK_WEATHER=True or configure OPENMETEO_API_KEY in backend environment variables."
+                    )
+                if attempt == 0:
+                    time.sleep(1.0)
             except requests.exceptions.RequestException as e:
                 logger.warning("Open-Meteo batch request attempt %d failed: %s", attempt + 1, str(e))
                 if attempt == 0:
