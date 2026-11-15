@@ -1,4 +1,11 @@
-from .geocoding import GeocodedLocation, BaseGeocodingService, get_geocoding_service
+from .geocoding import (
+    GeocodedLocation,
+    BaseGeocodingService,
+    PhotonGeocodingService,
+    NominatimGeocodingService,
+    get_geocoding_service,
+    geocode_location,
+)
 from .routing_provider import BaseRoutingProvider, get_routing_provider
 from .sampler import sample_route_checkpoints, haversine_distance
 from .risk_engine import (

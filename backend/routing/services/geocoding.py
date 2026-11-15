@@ -37,13 +37,14 @@ class BaseGeocodingService(ABC):
         pass
 
 
-class NominatimGeocodingService(BaseGeocodingService):
+class PhotonGeocodingService(BaseGeocodingService):
     """
-    Geocodes addresses using OpenStreetMap's Nominatim API.
+    Geocodes addresses using the Photon API (photon.komoot.io), which is backed
+    by OpenStreetMap data without the strict shared-IP rate limits of Nominatim.
     """
-    BASE_URL = "https://nominatim.openstreetmap.org/search"
+    BASE_URL = "https://photon.komoot.io/api/"
 
-    def __init__(self, user_agent: str | None = None, timeout: int = 8):
+    def __init__(self, user_agent: str | None = None, timeout: int = 10):
         self.user_agent = user_agent or getattr(
             settings, "GEOCODING_USER_AGENT", "spotter-weather-aware-truck-routing/1.0"
         )
@@ -65,9 +66,7 @@ class NominatimGeocodingService(BaseGeocodingService):
 
         params = {
             "q": clean_query,
-            "format": "json",
             "limit": 1,
-            "addressdetails": 1,
         }
 
         try:
@@ -85,15 +84,26 @@ class NominatimGeocodingService(BaseGeocodingService):
             logger.error("Geocoding request failed for '%s': %s", clean_query, str(e))
             raise GeocodingError(f"Unable to connect to geocoding service: {str(e)}")
 
-        if not data or not isinstance(data, list):
+        features = data.get("features", []) if isinstance(data, dict) else []
+        if not features:
             raise GeocodingNotFoundError(clean_query)
 
-        first_match = data[0]
+        first_feature = features[0]
         try:
-            lat = float(first_match["lat"])
-            lon = float(first_match["lon"])
-            display_name = first_match.get("display_name", clean_query)
-        except (KeyError, ValueError, TypeError) as e:
+            geometry = first_feature.get("geometry", {})
+            coordinates = geometry.get("coordinates", [])
+            lon = float(coordinates[0])
+            lat = float(coordinates[1])
+            properties = first_feature.get("properties", {})
+            name_parts = [
+                properties.get("name"),
+                properties.get("city"),
+                properties.get("state"),
+                properties.get("country"),
+            ]
+            display_parts = list(dict.fromkeys(p for p in name_parts if p))
+            display_name = ", ".join(display_parts) if display_parts else clean_query
+        except (IndexError, KeyError, ValueError, TypeError) as e:
             logger.error("Invalid coordinates in geocoding response: %s", str(e))
             raise GeocodingError(f"Invalid geocoding response received for '{clean_query}'.")
 
@@ -106,6 +116,38 @@ class NominatimGeocodingService(BaseGeocodingService):
 
         _GEOCODE_CACHE[cache_key] = result
         return result
+
+
+def geocode_location(query: str) -> dict | None:
+    """
+    Direct helper to geocode a location query via Photon API.
+    Returns {'lat': lat, 'lon': lon} or None if not found.
+    """
+    clean_query = query.strip()
+    if not clean_query:
+        return None
+
+    user_agent = getattr(
+        settings, "GEOCODING_USER_AGENT", "spotter-weather-aware-truck-routing/1.0"
+    )
+    resp = requests.get(
+        "https://photon.komoot.io/api/",
+        params={"q": clean_query, "limit": 1},
+        headers={"User-Agent": user_agent, "Accept": "application/json"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    features = resp.json().get("features", [])
+    if not features:
+        return None
+
+    # GeoJSON returns [longitude, latitude]
+    lon, lat = features[0]["geometry"]["coordinates"]
+    return {"lat": lat, "lon": lon}
+
+
+# Backward compatibility alias for Nominatim
+NominatimGeocodingService = PhotonGeocodingService
 
 
 class MockGeocodingService(BaseGeocodingService):
@@ -165,4 +207,4 @@ def get_geocoding_service() -> BaseGeocodingService:
     """
     if getattr(settings, "USE_MOCK_ROUTING", False) and getattr(settings, "DEBUG", False):
         return MockGeocodingService()
-    return NominatimGeocodingService()
+    return PhotonGeocodingService()

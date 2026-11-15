@@ -83,7 +83,7 @@ class RoutePlanViewTest(TestCase):
         self.assertGreater(len(rec["reason"]), 0)
 
     @override_settings(USE_MOCK_ROUTING=False)
-    @patch("routing.services.geocoding.NominatimGeocodingService.geocode")
+    @patch("routing.services.geocoding.PhotonGeocodingService.geocode")
     def test_origin_not_found(self, mock_geocode):
         from routing.exceptions import GeocodingNotFoundError
         mock_geocode.side_effect = GeocodingNotFoundError("Uncharted Nowhere")

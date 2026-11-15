@@ -14,7 +14,7 @@ spotter-assignment/
 │   ├── core/                  # Django project settings, WSGI, URLs, CORS
 │   ├── routing/               # Route planning, weather & recommendation app
 │   │   ├── services/          # Isolated service layer
-│   │   │   ├── geocoding.py        # Nominatim OpenStreetMap geocoder & in-memory cache
+│   │   │   ├── geocoding.py        # Photon (OpenStreetMap) geocoder & in-memory cache
 │   │   │   ├── routing_provider.py # OSRM & OpenRouteService routing providers
 │   │   │   ├── sampler.py          # Great-circle polyline waypoint sampler
 │   │   │   ├── weather.py          # Open-Meteo weather provider (batch, caching)
@@ -155,7 +155,7 @@ Open `http://localhost:5173` in your browser.
 | `ROUTING_PROVIDER` | `osrm` | Active routing engine: `osrm`, `openrouteservice`, or `mock` |
 | `OSRM_BASE_URL` | `https://router.project-osrm.org` | OSRM routing endpoint |
 | `OPENROUTESERVICE_API_KEY` | `""` | Optional API key if using OpenRouteService truck routing |
-| `GEOCODING_USER_AGENT` | `spotter-weather-aware-truck-routing/1.0` | Custom User-Agent for Nominatim geocoding |
+| `GEOCODING_USER_AGENT` | `spotter-weather-aware-truck-routing/1.0` | Custom User-Agent for Photon geocoding |
 | `USE_MOCK_ROUTING` | `False` | Offline mock routes for development (strictly rejected when `DEBUG=False`) |
 | `WEATHER_PROVIDER` | `open_meteo` | Active weather provider: `open_meteo` or `mock` |
 | `OPENMETEO_API_KEY` | `""` | Reserved — Open-Meteo free tier requires no API key |
