@@ -61,6 +61,12 @@ class RoutePlanViewTest(TestCase):
         self.assertGreater(len(first_route["checkpoints"]), 0)
         self.assertGreater(first_route["distance_miles"], 0)
         self.assertGreater(first_route["duration_hours"], 0)
+        self.assertIn("max_risk_level", first_route)
+        self.assertIn("risk_counts", first_route)
+
+        first_cp = first_route["checkpoints"][0]
+        self.assertIn("weather", first_cp)
+        self.assertIn("risk_level", first_cp["weather"])
 
     @override_settings(USE_MOCK_ROUTING=False)
     @patch("routing.services.geocoding.NominatimGeocodingService.geocode")

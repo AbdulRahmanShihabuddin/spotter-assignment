@@ -17,6 +17,8 @@ describe('RouteComparison', () => {
       checkpoint_count: 20,
       is_mock: false,
       provider: 'osrm',
+      max_risk_level: 'Low',
+      risk_counts: { low: 20, moderate: 0, high: 0, severe: 0, no_travel: 0, unavailable: 0 },
     },
     {
       route_id: 'route_2',
@@ -30,6 +32,8 @@ describe('RouteComparison', () => {
       checkpoint_count: 22,
       is_mock: false,
       provider: 'osrm',
+      max_risk_level: 'Moderate',
+      risk_counts: { low: 18, moderate: 4, high: 0, severe: 0, no_travel: 0, unavailable: 0 },
     },
   ];
 
@@ -38,7 +42,7 @@ describe('RouteComparison', () => {
     route_2: '#38BDF8',
   };
 
-  it('renders all route options with distances and durations', () => {
+  it('renders all route options with distances, durations, and risk badges', () => {
     const handleSelect = vi.fn();
     render(
       <RouteComparison
@@ -54,6 +58,8 @@ describe('RouteComparison', () => {
     expect(screen.getByText('963.1')).toBeInTheDocument();
     expect(screen.getByText('994.2')).toBeInTheDocument();
     expect(screen.getByText(/FASTEST/i)).toBeInTheDocument();
+    expect(screen.getByText('LOW')).toBeInTheDocument();
+    expect(screen.getByText('MODERATE')).toBeInTheDocument();
   });
 
   it('calls onSelectRoute when a route card is clicked', () => {

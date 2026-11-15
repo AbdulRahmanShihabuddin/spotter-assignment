@@ -5,6 +5,27 @@ export interface GeocodedLocation {
   display_name: string;
 }
 
+export type RiskLevelType = 'Low' | 'Moderate' | 'High' | 'Severe' | 'No Travel' | 'Unavailable';
+
+export interface CheckpointWeather {
+  is_available: boolean;
+  wind_mph: number | null;
+  rain_in_hr: number | null;
+  snow_in_hr: number | null;
+  forecast_time?: string | null;
+  wind_risk: RiskLevelType;
+  rain_risk: RiskLevelType;
+  snow_risk: RiskLevelType;
+  risk_level: RiskLevelType;
+}
+
+export interface HourlyForecastItem {
+  time: string;
+  wind_mph: number | null;
+  rain_in_hr: number | null;
+  snow_in_hr: number | null;
+}
+
 export interface Checkpoint {
   id: string;
   sequence: number;
@@ -14,11 +35,22 @@ export interface Checkpoint {
   distance_meters: number;
   estimated_elapsed_seconds: number;
   estimated_arrival_time: string;
+  weather?: CheckpointWeather;
+  hourly_forecast?: HourlyForecastItem[];
 }
 
 export interface RouteGeometry {
   type: 'LineString';
   coordinates: [number, number][]; // [lon, lat]
+}
+
+export interface RiskCounts {
+  low: number;
+  moderate: number;
+  high: number;
+  severe: number;
+  no_travel: number;
+  unavailable: number;
 }
 
 export interface RouteOption {
@@ -33,6 +65,8 @@ export interface RouteOption {
   checkpoint_count: number;
   is_mock: boolean;
   provider: string;
+  max_risk_level?: RiskLevelType;
+  risk_counts?: RiskCounts;
 }
 
 export interface RoutePlanRequest {

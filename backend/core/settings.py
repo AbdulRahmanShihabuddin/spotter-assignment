@@ -123,3 +123,8 @@ GEOCODING_USER_AGENT = os.getenv('GEOCODING_USER_AGENT', 'spotter-weather-aware-
 
 # Explicit mock routing toggle (for offline testing/development only; rejected when DEBUG=False)
 USE_MOCK_ROUTING = os.getenv('USE_MOCK_ROUTING', 'False').lower() in ('true', '1', 'yes')
+
+# Weather Provider Configuration
+WEATHER_PROVIDER = os.getenv('WEATHER_PROVIDER', 'open-meteo').lower()
+OPENMETEO_API_KEY = os.getenv('OPENMETEO_API_KEY', '')
+USE_MOCK_WEATHER = os.getenv('USE_MOCK_WEATHER', 'False').lower() in ('true', '1', 'yes')

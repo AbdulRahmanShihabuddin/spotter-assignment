@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { TripForm } from './components/TripForm';
 import { RouteComparison } from './components/RouteComparison';
+import { CheckpointInspector } from './components/CheckpointInspector';
 import { RouteMap } from './components/RouteMap';
 import { StatusBanner } from './components/StatusBanner';
 import { planRoute, checkBackendHealth, ApiError } from './services/api';
-import { RoutePlanRequest, RoutePlanResponse } from './types/route';
+import { Checkpoint, RoutePlanRequest, RoutePlanResponse } from './types/route';
 
 const ROUTE_COLORS: Record<string, string> = {
   route_1: '#F59E0B', // Primary Amber
@@ -19,6 +20,8 @@ const ROUTE_COLORS: Record<string, string> = {
 export function App() {
   const [routePlan, setRoutePlan] = useState<RoutePlanResponse | null>(null);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [selectedCheckpoint, setSelectedCheckpoint] = useState<Checkpoint | null>(null);
+  const [truckWeightLbs, setTruckWeightLbs] = useState<number>(42000);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<{ message: string; detail?: string } | null>(null);
   const [backendStatus, setBackendStatus] = useState<{
@@ -41,6 +44,8 @@ export function App() {
   const handleTripSubmit = async (params: RoutePlanRequest) => {
     setIsLoading(true);
     setErrorMessage(null);
+    setSelectedCheckpoint(null);
+    setTruckWeightLbs(params.weight_lbs);
 
     try {
       const response = await planRoute(params);
@@ -68,7 +73,13 @@ export function App() {
     }
   };
 
+  const handleSelectRoute = (routeId: string) => {
+    setSelectedRouteId(routeId);
+    setSelectedCheckpoint(null);
+  };
+
   const routes = routePlan?.routes || [];
+  const activeRoute = routes.find((r) => r.route_id === selectedRouteId) || routes[0] || null;
 
   return (
     <div className="h-screen w-screen flex flex-col bg-dark-bg text-slate-100 overflow-hidden">
@@ -80,8 +91,8 @@ export function App() {
 
       {/* Main Workspace (Side Panel + Interactive Map) */}
       <main className="flex-1 flex flex-col md:flex-row min-h-0 relative">
-        {/* Left Side Panel: Trip Form + Route Comparison */}
-        <aside className="w-full md:w-[380px] lg:w-[410px] h-full flex flex-col bg-dark-surface border-r border-dark-border shrink-0 z-10 overflow-y-auto">
+        {/* Left Side Panel: Trip Form + Route Comparison + Checkpoint Inspector */}
+        <aside className="w-full md:w-[390px] lg:w-[420px] h-full flex flex-col bg-dark-surface border-r border-dark-border shrink-0 z-10 overflow-y-auto">
           {/* Error Banner */}
           {errorMessage && (
             <StatusBanner
@@ -102,9 +113,25 @@ export function App() {
             <RouteComparison
               routes={routes}
               selectedRouteId={selectedRouteId}
-              onSelectRoute={setSelectedRouteId}
+              onSelectRoute={handleSelectRoute}
               colors={ROUTE_COLORS}
             />
+          )}
+
+          {/* Checkpoint Inspector Panel */}
+          {selectedCheckpoint && (
+            <CheckpointInspector
+              checkpoint={selectedCheckpoint}
+              onClose={() => setSelectedCheckpoint(null)}
+              truckWeightLbs={truckWeightLbs}
+            />
+          )}
+
+          {/* Instruction hint if checkpoints are loaded but none selected */}
+          {routes.length > 0 && !selectedCheckpoint && activeRoute && (
+            <div className="p-3 text-[11px] font-mono text-slate-400 border-t border-dark-border/40 bg-dark-panel/40 text-center">
+              Click any circular checkpoint on the map to inspect wind, rain, and snow risk.
+            </div>
           )}
         </aside>
 
@@ -115,7 +142,9 @@ export function App() {
             destination={routePlan?.destination || null}
             routes={routes}
             selectedRouteId={selectedRouteId}
-            onSelectRoute={setSelectedRouteId}
+            onSelectRoute={handleSelectRoute}
+            selectedCheckpointId={selectedCheckpoint?.id || null}
+            onSelectCheckpoint={setSelectedCheckpoint}
             colors={ROUTE_COLORS}
             isLoading={isLoading}
           />

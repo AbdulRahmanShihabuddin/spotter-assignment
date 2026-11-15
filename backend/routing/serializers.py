@@ -1,5 +1,5 @@
 """
-Serializers for Route Generation API requests and responses.
+Serializers for Route Generation API requests and responses with weather integration.
 """
 from rest_framework import serializers
 from django.utils import timezone
@@ -66,6 +66,25 @@ class RoutePlanRequestSerializer(serializers.Serializer):
         return attrs
 
 
+class CheckpointWeatherSerializer(serializers.Serializer):
+    is_available = serializers.BooleanField()
+    wind_mph = serializers.FloatField(allow_null=True)
+    rain_in_hr = serializers.FloatField(allow_null=True)
+    snow_in_hr = serializers.FloatField(allow_null=True)
+    forecast_time = serializers.CharField(allow_null=True, required=False)
+    wind_risk = serializers.CharField()
+    rain_risk = serializers.CharField()
+    snow_risk = serializers.CharField()
+    risk_level = serializers.CharField()
+
+
+class HourlyForecastItemSerializer(serializers.Serializer):
+    time = serializers.CharField()
+    wind_mph = serializers.FloatField(allow_null=True)
+    rain_in_hr = serializers.FloatField(allow_null=True)
+    snow_in_hr = serializers.FloatField(allow_null=True)
+
+
 class CheckpointSerializer(serializers.Serializer):
     id = serializers.CharField()
     sequence = serializers.IntegerField()
@@ -75,6 +94,8 @@ class CheckpointSerializer(serializers.Serializer):
     distance_meters = serializers.FloatField()
     estimated_elapsed_seconds = serializers.FloatField()
     estimated_arrival_time = serializers.CharField()
+    weather = CheckpointWeatherSerializer(required=False)
+    hourly_forecast = HourlyForecastItemSerializer(many=True, required=False)
 
 
 class GeoJSONGeometrySerializer(serializers.Serializer):
@@ -86,6 +107,15 @@ class GeoJSONGeometrySerializer(serializers.Serializer):
             max_length=3
         )
     )
+
+
+class RiskCountsSerializer(serializers.Serializer):
+    low = serializers.IntegerField(default=0)
+    moderate = serializers.IntegerField(default=0)
+    high = serializers.IntegerField(default=0)
+    severe = serializers.IntegerField(default=0)
+    no_travel = serializers.IntegerField(default=0)
+    unavailable = serializers.IntegerField(default=0)
 
 
 class RouteOptionSerializer(serializers.Serializer):
@@ -100,6 +130,8 @@ class RouteOptionSerializer(serializers.Serializer):
     checkpoint_count = serializers.IntegerField()
     is_mock = serializers.BooleanField()
     provider = serializers.CharField()
+    max_risk_level = serializers.CharField(default="Low")
+    risk_counts = RiskCountsSerializer(required=False)
 
 
 class GeocodedLocationSerializer(serializers.Serializer):

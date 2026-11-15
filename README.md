@@ -2,7 +2,7 @@
 
 A specialized commercial route-planning platform designed for freight dispatchers and truck drivers to evaluate corridor alternatives and plan routes against weather risks.
 
-This repository contains the complete implementation for **Phase 1: Project Foundation and Route Generation**.
+This repository contains the complete implementation through **Phase 2: Weather Integration, Checkpoint Sampling and Risk Classification**.
 
 ---
 
@@ -12,13 +12,15 @@ This repository contains the complete implementation for **Phase 1: Project Foun
 spotter-assignment/
 ├── backend/
 │   ├── core/                  # Django project settings, WSGI, URLs, CORS
-│   ├── routing/               # Route planning & geocoding app
+│   ├── routing/               # Route planning, weather & geocoding app
 │   │   ├── services/          # Isolated service layer
-│   │   │   ├── geocoding.py   # Nominatim OpenStreetMap geocoder & in-memory cache
+│   │   │   ├── geocoding.py        # Nominatim OpenStreetMap geocoder & in-memory cache
 │   │   │   ├── routing_provider.py # OSRM & OpenRouteService routing providers
-│   │   │   ├── sampler.py     # Great-circle polyline waypoint sampler
-│   │   │   └── mock_data.py   # Offline test corridors
-│   │   ├── serializers.py     # Request/response validation
+│   │   │   ├── sampler.py          # Great-circle polyline waypoint sampler
+│   │   │   ├── weather.py          # Open-Meteo weather provider (batch, caching)
+│   │   │   ├── risk_engine.py      # Risk classification engine (wind/rain/snow + load rules)
+│   │   │   └── mock_data.py        # Offline test corridors
+│   │   ├── serializers.py     # Request/response validation incl. weather & risk
 │   │   ├── views.py           # RoutePlanView & HealthCheckView
 │   │   └── tests/             # Unit and integration test suite
 │   ├── requirements.txt
@@ -26,13 +28,15 @@ spotter-assignment/
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── Header.tsx          # Minimal status bar & engine indicator
-│   │   │   ├── TripForm.tsx        # Trip inputs, presets, and validation
-│   │   │   ├── RouteMap.tsx        # Leaflet CartoDB Dark Matter interactive map
-│   │   │   ├── RouteComparison.tsx # Alternative route cards & metrics
-│   │   │   └── StatusBanner.tsx    # Accessible error notifications
+│   │   │   ├── Header.tsx               # Minimal status bar & engine indicator
+│   │   │   ├── TripForm.tsx             # Trip inputs, presets, and validation
+│   │   │   ├── RouteMap.tsx             # Leaflet interactive map with risk-colored checkpoints
+│   │   │   ├── RouteComparison.tsx      # Route cards with risk assessment banners
+│   │   │   ├── CheckpointInspector.tsx  # Per-checkpoint weather detail panel
+│   │   │   └── StatusBanner.tsx         # Accessible error notifications
 │   │   ├── services/api.ts         # Type-safe API client
-│   │   ├── types/route.ts          # GeoJSON, Route, and Checkpoint interfaces
+│   │   ├── types/route.ts          # GeoJSON, Route, Checkpoint, and Weather interfaces
+│   │   ├── utils/risk.ts           # Risk color mapping utilities
 │   │   └── __tests__/              # Vitest & Testing Library test suite
 │   ├── package.json
 │   ├── vite.config.ts
@@ -131,6 +135,9 @@ Open `http://localhost:5173` in your browser.
 | `OPENROUTESERVICE_API_KEY` | `""` | Optional API key if using OpenRouteService truck routing |
 | `GEOCODING_USER_AGENT` | `spotter-weather-aware-truck-routing/1.0` | Custom User-Agent for Nominatim geocoding |
 | `USE_MOCK_ROUTING` | `False` | Offline mock routes for development (strictly rejected when `DEBUG=False`) |
+| `WEATHER_PROVIDER` | `open_meteo` | Active weather provider: `open_meteo` or `mock` |
+| `OPENMETEO_API_KEY` | `""` | Reserved — Open-Meteo free tier requires no API key |
+| `USE_MOCK_WEATHER` | `False` | Offline mock weather for development (strictly rejected when `DEBUG=False`) |
 
 ### Frontend (`frontend/.env`)
 
@@ -152,7 +159,7 @@ Returns server status and active routing provider configuration.
 {
   "status": "healthy",
   "service": "weather-aware-truck-routing",
-  "phase": "Phase 1: Project Foundation and Route Generation",
+  "phase": "Phase 2: Weather Integration, Checkpoint Sampling and Risk Classification",
   "routing_provider": "osrm",
   "is_mock": false,
   "debug": true
@@ -208,6 +215,15 @@ Returns server status and active routing provider configuration.
         "coordinates": [[-87.624351, 41.875563], ...]
       },
       "checkpoint_count": 40,
+      "max_risk_level": "LOW",
+      "risk_counts": {
+        "low": 40,
+        "moderate": 0,
+        "high": 0,
+        "severe": 0,
+        "no_travel": 0,
+        "unavailable": 0
+      },
       "checkpoints": [
         {
           "id": "cp_0",
@@ -216,7 +232,20 @@ Returns server status and active routing provider configuration.
           "longitude": -87.624351,
           "distance_miles": 0.0,
           "estimated_elapsed_seconds": 0.0,
-          "estimated_arrival_time": "2026-11-16T08:00:00Z"
+          "estimated_arrival_time": "2026-11-16T08:00:00Z",
+          "weather": {
+            "wind_speed_mph": 3.4,
+            "rain_intensity_in_hr": 0.0,
+            "snow_intensity_in_hr": 0.0,
+            "forecast_time": "2026-11-16T08:00:00Z",
+            "is_available": true,
+            "wind_risk": "LOW",
+            "rain_risk": "LOW",
+            "snow_risk": "LOW",
+            "combined_risk": "LOW",
+            "load_rule_applied": false,
+            "load_rule_description": null
+          }
         }
       ],
       "is_mock": false,
@@ -230,22 +259,90 @@ Returns server status and active routing provider configuration.
 
 ## Testing
 
-- **Backend tests**:
+- **Backend tests** (40 total):
   ```bash
   cd backend && python manage.py test
   ```
-  Runs 25 unit and integration tests covering serializers, geocoding error conditions, polyline sampling math, routing provider integrations, and API endpoints.
+  Covers risk engine thresholds, load-weight rules, boundary conditions, Open-Meteo weather provider batching & caching, weather serializers, geocoding error conditions, polyline sampling math, routing provider integrations, and API endpoints.
 
-- **Frontend tests**:
+- **Frontend tests** (13 total):
   ```bash
   cd frontend && npm run test
   ```
-  Runs Vitest component tests verifying user input validation, corridor swapping, interval selection, route comparison switching, and DOM accessibility.
+  Runs Vitest component tests verifying user input validation, corridor swapping, interval selection, route comparison with risk badges, checkpoint inspector rendering (unavailable state, load rule notices), and DOM accessibility.
 
 ---
 
-## Known Limitations & Phase 2 Roadmap
+## Weather Provider
 
-- **Phase 1 Scope**: This phase implements foundation, geocoding, multi-route alternative generation, checkpoint sampling along the road geometry, and interactive map comparison.
-- **Weather Forecasts**: Per assignment instructions, live weather risk analysis, radar overlays, and checkpoint forecast evaluation are excluded from Phase 1 and will be introduced in subsequent phases.
-- **OSRM Public Server Alternatives**: OSRM returns valid highway alternatives found in the OpenStreetMap routing graph (typically 1 to 3 alternatives depending on geographical road density). As instructed, artificial duplicate routes are never fabricated if the road network only yields 1 or 2 distinct paths.
+**Open-Meteo** (free, no API key required)
+
+- Endpoint: `https://api.open-meteo.com/v1/forecast`
+- Forecast window: 72-hour hourly forecasts
+- Batch queries: up to 30 coordinates per request
+- Cache: 30-minute in-memory cache (keyed on coordinates rounded to 2 decimal places)
+- Units: `wind_speed_unit=mph`, `precipitation_unit=inch`
+- Fields used: `wind_speed_10m`, `rain`, `snowfall`
+
+Checkpoint arrival matching uses the **closest available hourly slot within 90 minutes** of the estimated arrival time. If the arrival falls outside the 72-hour forecast window, the checkpoint is marked `is_available: false` — it is **never silently classified as Low risk**.
+
+---
+
+## Risk Classification Methodology
+
+Risk is assessed independently for wind, rain and snow at each checkpoint, then the **most severe condition** wins as the combined risk.
+
+### Wind
+
+| Speed (mph) | Risk |
+|---|---|
+| Below 25 | Low |
+| 25–34 | Moderate |
+| 35–44 | High |
+| 45–54 | Severe |
+| 55+ | No Travel |
+
+### Rain
+
+| Intensity (in/hr) | Risk |
+|---|---|
+| Below 0.10 | Low |
+| 0.10–0.249 | Moderate |
+| 0.25–0.499 | High |
+| 0.50–1.00 | Severe |
+| Above 1.00 | No Travel |
+
+### Snow
+
+| Intensity (in/hr) | Risk |
+|---|---|
+| Below 0.5 | Low |
+| 0.5–0.99 | Moderate |
+| 1.0–1.99 | High |
+| 2.0–3.0 | Severe |
+| Above 3.0 | No Travel |
+
+### Load-Weight Adjustments
+
+Applied in addition to the base wind thresholds using the truck gross weight supplied by the user:
+
+| Condition | Load Threshold | Resulting Risk |
+|---|---|---|
+| Wind ≥ 55 mph | Any load | No Travel |
+| Wind 45–54 mph | Load > 30,000 lb | No Travel |
+| Wind 35–44 mph | Load > 40,000 lb | Severe |
+
+### Unit Conversions
+
+All incoming weather measurements are converted to canonical units before classification:
+- Wind: km/h → mph (Open-Meteo is configured to return mph directly)
+- Rainfall: mm/hr → in/hr (Open-Meteo returns inches when `precipitation_unit=inch`)
+- Snowfall: cm/hr → in/hr (Open-Meteo snowfall is in cm; divided by 2.54)
+
+---
+
+## Known Limitations & Phase 3 Roadmap
+
+- **OSRM Public Server Alternatives**: OSRM returns valid highway alternatives found in the OpenStreetMap routing graph (typically 1 to 2 alternatives depending on geographical road density). Artificial duplicate routes are never fabricated.
+- **72-Hour Forecast Horizon**: Departures more than ~3 days in the future will have checkpoints marked `is_available: false`. Never silently classified as Low.
+- **Phase 3 Planned**: Route ranking and recommendation engine — a composite weighted score across all checkpoints to recommend the safest corridor, plus a forecast heatmap slider for time-of-day weather visualization.

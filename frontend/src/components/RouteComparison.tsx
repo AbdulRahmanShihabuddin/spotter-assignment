@@ -1,6 +1,7 @@
 import React from 'react';
-import { CheckCircle2, Clock, MapPin, Milestone, Route } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock, Milestone, Route, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { RouteOption } from '../types/route';
+import { getRiskBadgeClasses } from '../utils/risk';
 
 interface RouteComparisonProps {
   routes: RouteOption[];
@@ -44,12 +45,17 @@ export const RouteComparison: React.FC<RouteComparisonProps> = ({
         </span>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         {routes.map((route, idx) => {
           const isSelected = route.route_id === selectedRouteId;
           const routeColor = colors[route.route_id] || '#F59E0B';
           const durationDiffHours = route.duration_hours - fastestDuration;
           const diffMinutes = Math.round(durationDiffHours * 60);
+
+          const maxRisk = route.max_risk_level || 'Low';
+          const riskBadge = getRiskBadgeClasses(maxRisk);
+          const riskCounts = route.risk_counts;
+          const elevatedCount = (riskCounts?.high || 0) + (riskCounts?.severe || 0) + (riskCounts?.no_travel || 0);
 
           return (
             <div
@@ -69,9 +75,9 @@ export const RouteComparison: React.FC<RouteComparisonProps> = ({
                   : 'bg-dark-panel border-dark-border hover:border-slate-600 hover:bg-dark-elevated/60'
               }`}
             >
-              {/* Header row: Color bar, name, and selection icon */}
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center space-x-2">
+              {/* Header row: Color dot, name, and selection/fastest pill */}
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center space-x-2 truncate">
                   <span
                     className="w-2.5 h-2.5 rounded-full ring-2 ring-dark-bg shrink-0"
                     style={{ backgroundColor: routeColor }}
@@ -81,7 +87,7 @@ export const RouteComparison: React.FC<RouteComparisonProps> = ({
                   </h4>
                 </div>
 
-                <div className="flex items-center space-x-1.5">
+                <div className="flex items-center space-x-1.5 shrink-0">
                   {idx === 0 && (
                     <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/60">
                       FASTEST
@@ -95,15 +101,34 @@ export const RouteComparison: React.FC<RouteComparisonProps> = ({
                 </div>
               </div>
 
+              {/* Weather Risk Banner for Route */}
+              <div className="flex items-center justify-between py-1 px-2 rounded bg-dark-surface/90 border border-dark-border/60 mb-2">
+                <div className="flex items-center space-x-1.5">
+                  {maxRisk === 'Low' ? (
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  ) : maxRisk === 'Moderate' ? (
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                  ) : (
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+                  )}
+                  <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">
+                    Risk Assessment:
+                  </span>
+                </div>
+                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${riskBadge.bg} ${riskBadge.text} ${riskBadge.border}`}>
+                  {maxRisk.toUpperCase()}
+                </span>
+              </div>
+
               {/* Numerical details in IBM Plex Mono */}
-              <div className="grid grid-cols-3 gap-2 pt-2 border-t border-dark-border/60">
+              <div className="grid grid-cols-3 gap-2 pt-1 border-t border-dark-border/40">
                 {/* Distance */}
                 <div>
-                  <span className="text-[10px] text-slate-500 uppercase tracking-wider block">
+                  <span className="text-[9px] text-slate-500 uppercase tracking-wider block">
                     Distance
                   </span>
                   <div className="flex items-baseline space-x-1">
-                    <Milestone className="w-3 h-3 text-slate-400 inline" />
+                    <Milestone className="w-2.5 h-2.5 text-slate-400 inline" />
                     <span className="text-xs font-mono font-medium text-slate-100">
                       {route.distance_miles.toLocaleString(undefined, { maximumFractionDigits: 1 })}
                     </span>
@@ -113,20 +138,20 @@ export const RouteComparison: React.FC<RouteComparisonProps> = ({
 
                 {/* Duration */}
                 <div>
-                  <span className="text-[10px] text-slate-500 uppercase tracking-wider block">
-                    Est. Time
+                  <span className="text-[9px] text-slate-500 uppercase tracking-wider block">
+                    Travel Time
                   </span>
                   <div className="flex items-baseline space-x-1">
-                    <Clock className="w-3 h-3 text-slate-400 inline" />
+                    <Clock className="w-2.5 h-2.5 text-slate-400 inline" />
                     <span className="text-xs font-mono font-medium text-slate-100">
                       {formatDuration(route.duration_hours)}
                     </span>
                   </div>
                 </div>
 
-                {/* Checkpoints or Diff */}
+                {/* Risk / Variance */}
                 <div>
-                  <span className="text-[10px] text-slate-500 uppercase tracking-wider block">
+                  <span className="text-[9px] text-slate-500 uppercase tracking-wider block">
                     {diffMinutes > 0 ? 'Variance' : 'Checkpoints'}
                   </span>
                   <div className="flex items-baseline space-x-1">
@@ -135,16 +160,21 @@ export const RouteComparison: React.FC<RouteComparisonProps> = ({
                         +{diffMinutes}m
                       </span>
                     ) : (
-                      <>
-                        <MapPin className="w-3 h-3 text-slate-400 inline" />
-                        <span className="text-xs font-mono text-slate-300">
-                          {route.checkpoint_count} pts
-                        </span>
-                      </>
+                      <span className="text-xs font-mono text-slate-300">
+                        {route.checkpoint_count} pts
+                      </span>
                     )}
                   </div>
                 </div>
               </div>
+
+              {/* Elevated risk alert bar if any High/Severe/No Travel checkpoints */}
+              {elevatedCount > 0 && (
+                <div className="mt-2 text-[10px] font-mono text-rose-300 bg-rose-950/40 px-2 py-0.5 rounded border border-rose-800/40 flex items-center justify-between">
+                  <span>Elevated Weather Risk:</span>
+                  <span className="font-semibold">{elevatedCount} Checkpoint{elevatedCount > 1 ? 's' : ''}</span>
+                </div>
+              )}
             </div>
           );
         })}
